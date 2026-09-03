@@ -7,9 +7,6 @@ dist/
 __pycache__/
 *.pyc
 
-# node
-node_modules/
-web/dist/
 
 # local state and secrets
 .env
