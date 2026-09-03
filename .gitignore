@@ -1,0 +1,20 @@
+# build output
+build/
+dist/
+*.spec
+
+# python
+__pycache__/
+*.pyc
+
+# node
+node_modules/
+web/dist/
+
+# local state and secrets
+.env
+*.log
+
+# editor
+.vscode/
+.idea/
