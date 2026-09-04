@@ -21,7 +21,7 @@ What is different from a split terminal:
   panes. Opening the workspace opens all of them in one click, each shell
   already in its directory, in the layout you left it in.
 - **Startup commands per folder.** Right-click a folder and set the command it
-  should run on open. `npm run dev` in `web`, `pytest -w` in `tests`. Opening
+  should run on open. `npm run dev` in `web`, `pytest` in `tests`. Opening
   the workspace starts the project.
 - **Broadcast typing.** Toggle it and every keystroke goes to every pane in
   the tab. Pull four repos or restart three services without repeating
@@ -123,9 +123,10 @@ the terminal emulator and all of the chrome drawn on canvases.
 | `multiterm/app.py` | Window, tabs, pane grid, broadcast routing, the 60 fps loop |
 
 Each frame gives the shells a few milliseconds to parse and spends the rest
-drawing. Measured with four panes streaming thousands of lines each: about
-70 frames a second, frame work averaging 12 ms. Background tabs keep draining
-their shells without drawing.
+drawing. `tests/bench_render.py` with four panes streaming thousands of lines
+each, on a Core Ultra 9 288V laptop: about 50 frames a second, frame work
+averaging 3 ms with a 95th percentile of 10 ms. Idle, a frame costs under
+0.1 ms. Background tabs keep draining their shells without drawing.
 
 Display scaling was the hardest bug. Tk enlarges point-sized fonts on a
 high-DPI screen but knows nothing about pixel constants in the layout, so at
