@@ -109,7 +109,7 @@ class TerminalView(tk.Frame):
         self.fg = th["fg"]
         self.cursor_color = th["cursor"]
         self.sel_bg = th["sel"]
-        self.bg_top = mix(self.bg, "#FFFFFF", 0.045)
+        self.bg_top = self.bg
         self.match_bg = mix(self.bg, UI["warn"], 0.35)
         self.cur_match_bg = mix(self.bg, UI["accent"], 0.65)
 
@@ -348,22 +348,7 @@ class TerminalView(tk.Frame):
             return
         self._card_sig = sig
         c.delete("card")
-        fade = min(h, 150)
-        gfx.round_vgrad(c, 0, 0, w, fade, RADIUS, self.bg_top, self.bg,
-                        tags="card")
-        gfx.round_rect(c, 0, fade - RADIUS, w, h, RADIUS, fill=self.bg,
-                       outline="", tags="card")
-        if self._focused:
-            gfx.round_rect(c, 1, 1, w - 1, h - 1, RADIUS,
-                           fill="", outline=mix(self.bg, UI["accent"], 0.55),
-                           width=1.6, tags="card")
-        # depth: a soft shadow just under the pane header
-        for i in range(7):
-            t = i / 6
-            c.create_rectangle(RADIUS - 2, i, w - RADIUS + 2, i + 1,
-                               outline="", tags="card",
-                               fill=mix(mix(self.bg_top, "#000000", 0.32),
-                                        self.bg_top, t))
+        c.create_rectangle(0, 0, w, h, fill=self.bg, outline="", tags="card")
         c.tag_lower("card")
 
     def _draw_row(self, y, chars, attrs, styles, clear=True):
@@ -469,8 +454,7 @@ class TerminalView(tk.Frame):
                            fill=mix(self.bg, "#FFFFFF", 0.05 if strong else 0.02),
                            outline="", tags="ovl")
             gfx.round_rect(c, x0, ty, x1, ty + thumb_h, SB_W / 2,
-                           fill=mix(self.bg, UI["accent"] if strong else "#FFFFFF",
-                                    0.55 if strong else 0.18),
+                           fill=mix(self.bg, "#FFFFFF", 0.32 if strong else 0.14),
                            outline="", tags="ovl")
             self._ovl_hits.append((w - ui.px(16), 0, w, h, "scrollbar"))
 
@@ -480,11 +464,11 @@ class TerminalView(tk.Frame):
             bw = gfx.measure(label, 8, True) + ui.px(26)
             bx = (w - bw) / 2
             by = h - PAD_Y - ui.px(30)
-            gfx.round_vgrad(c, bx, by, bx + bw, by + ui.px(26), ui.px(13),
-                            mix(UI["accent"], "#FFFFFF", 0.15), UI["accent2"],
-                            tags="ovl")
+            gfx.round_rect(c, bx, by, bx + bw, by + ui.px(26), ui.px(13),
+                           fill=mix(self.bg, "#FFFFFF", 0.12),
+                           outline=mix(self.bg, "#FFFFFF", 0.22), tags="ovl")
             c.create_text(bx + bw / 2, by + ui.px(13), text=label,
-                          fill="#FFFFFF",
+                          fill=self.fg,
                           font=(theme.ui_family(), 8, "bold"), tags="ovl")
             self._ovl_hits.append((bx, by, bx + bw, by + ui.px(26), "jump"))
 
@@ -507,9 +491,9 @@ class TerminalView(tk.Frame):
             by = PAD_Y
             gfx.round_rect(c, bx, by, bx + bw, by + ui.px(30), ui.px(9),
                            fill=mix(self.bg, "#FFFFFF", 0.09),
-                           outline=UI["accent"], tags="ovl")
+                           outline=UI["border_hi"], tags="ovl")
             c.create_text(bx + 12, by + 15, text="⌕", anchor="w",
-                          fill=UI["accent"],
+                          fill=UI["text_dim"],
                           font=(theme.ui_family(), 10), tags="ovl")
             shown = self.find_query or "find in pane…"
             c.create_text(bx + 28, by + 15, text=shown[:24], anchor="w",

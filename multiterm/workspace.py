@@ -17,8 +17,9 @@ SKIP_DIRS = {".git", ".svn", "node_modules", "__pycache__", ".venv", "venv",
 
 class Workspace:
     def __init__(self, name, root, folders=None, expanded=True, shell=None,
-                 layout="Auto", commands=None):
+                 layout="Auto", commands=None, pinned=False):
         self.name = name
+        self.pinned = bool(pinned)
         self.root = os.path.abspath(root) if root else ""
         self.folders = list(folders) if folders else []
         self.expanded = expanded
@@ -51,9 +52,15 @@ class Workspace:
                 for e in it:
                     if len(found) >= limit:
                         break
-                    if e.is_dir() and not e.name.startswith(".") \
-                            and e.name not in SKIP_DIRS:
-                        found.append(e.path)
+                    if not e.is_dir() or e.name.startswith(".")                             or e.name in SKIP_DIRS:
+                        continue
+                    try:
+                        attrs = e.stat(follow_symlinks=False).st_file_attributes
+                    except (OSError, AttributeError):
+                        attrs = 0
+                    if attrs & 0x6:            # FILE_ATTRIBUTE_HIDDEN | SYSTEM
+                        continue
+                    found.append(e.path)
         except OSError:
             return []
         return sorted(found, key=lambda p: os.path.basename(p).lower())
@@ -76,14 +83,16 @@ class Workspace:
     def to_dict(self):
         return {"name": self.name, "root": self.root, "folders": self.folders,
                 "expanded": self.expanded, "shell": self.shell,
-                "layout": self.layout, "commands": self.commands}
+                "layout": self.layout, "commands": self.commands,
+                "pinned": self.pinned}
 
     @staticmethod
     def from_dict(d):
         return Workspace(d.get("name") or os.path.basename(d.get("root", "")),
                          d.get("root", ""), d.get("folders"),
                          d.get("expanded", True), d.get("shell"),
-                         d.get("layout", "Auto"), d.get("commands"))
+                         d.get("layout", "Auto"), d.get("commands"),
+                         d.get("pinned", False))
 
 
 class WorkspaceStore:
@@ -138,6 +147,10 @@ class WorkspaceStore:
 
     def rename(self, ws, name):
         ws.name = name
+        self.save()
+
+    def set_pinned(self, ws, pinned):
+        ws.pinned = bool(pinned)
         self.save()
 
     def pin_folder(self, ws, path):

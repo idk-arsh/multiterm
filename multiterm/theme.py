@@ -11,8 +11,8 @@ ANSI_CAMPBELL = [
 
 THEMES = {
     "Graphite": {
-        "bg": "#0E0E12", "fg": "#E3E3E8", "cursor": "#0A84FF",
-        "sel": "#2C4A6E",
+        "bg": "#111114", "fg": "#E3E3E8", "cursor": "#5B8DEF",
+        "sel": "#243B5E",
         "ansi": ["#16161A", "#FF6961", "#30D158", "#FFD60A",
                  "#0A84FF", "#BF5AF2", "#5AC8FA", "#D5D5DB",
                  "#5A5A61", "#FF8A80", "#5BE07A", "#FFE066",
@@ -51,26 +51,30 @@ DEFAULT_THEME = "Graphite"
 
 # ------------------------------------------------------------------- chrome
 UI = {
-    "bg": "#131316",          # backdrop behind the panes
-    "sidebar_top": "#1C1D22",
-    "sidebar_bot": "#17181C",
-    "chrome": "#1E1F25",      # title / tool bar
-    "chrome_lo": "#191A1F",
-    "panel": "#26272E",       # cards, tabs
-    "raised": "#31323A",      # hover / elevated
-    "sunken": "#131316",
-    "border": "#3A3C45",
-    "border_soft": "#26272E",
-    "accent": "#0A84FF",      # macOS system blue
-    "accent2": "#5E5CE6",     # macOS indigo
-    "accent_dim": "#1D3A5C",
-    "accent_glow": "#2A5A8C",
-    "text": "#F2F2F7",
-    "text_dim": "#D4D7DF",
-    "muted": "#9AA1AE",
-    "ok": "#30D158",
-    "warn": "#FFD60A",
-    "err": "#FF453A",
+    "bg": "#09090A",          # window backdrop behind the cards
+    "sidebar": "#0D0D0F",
+    "sidebar_top": "#0D0D0F",
+    "sidebar_bot": "#0D0D0F",
+    "chrome": "#0D0D0F",      # top bar, command bar
+    "chrome_lo": "#0D0D0F",
+    "panel": "#141417",       # tabs, inputs, badges
+    "card": "#111114",
+    "raised": "#1E1E22",      # hover / selected rows
+    "sunken": "#0B0B0D",
+    "border": "#26262B",
+    "border_soft": "#1C1C20",
+    "border_hi": "#3C3C43",   # focused card edge
+    "accent": "#5B8DEF",
+    "accent2": "#7B6CF6",
+    "accent_dim": "#1B2A47",
+    "accent_glow": "#2A4470",
+    "warm": "#E39A7B",        # the one coloured action per card
+    "text": "#ECECEF",
+    "text_dim": "#B5B5BD",
+    "muted": "#7A7A84",
+    "ok": "#3DD68C",
+    "warn": "#F2C14E",
+    "err": "#F26D6D",
 }
 
 BADGES = {

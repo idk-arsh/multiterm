@@ -436,6 +436,8 @@ def main():
                 ("sidebar", app.sidebar, False)]
     surfaces += [("pane %d header" % (p.index + 1), p.header, True)
                  for p in app.current_page().panes]
+    surfaces += [("pane %d footer" % (p.index + 1), p.footer, True)
+                 for p in app.current_page().panes]
     bad = []
     for name, canvas, check_y in surfaces:
         for item in clipped(canvas, check_y):

@@ -7,13 +7,13 @@ reshaped freely instead of snapping to a fixed grid.
 
 from . import ui
 
-SASH = 6            # design pixels; apply_scale() adjusts for the display
+SASH = 10           # design pixels; apply_scale() adjusts for the display
 MIN_SIDE = 90       # smallest pane edge we allow while dragging
 
 
 def apply_scale():
     global SASH, MIN_SIDE
-    SASH = ui.px(6)
+    SASH = ui.px(10)
     MIN_SIDE = ui.px(90)
 
 

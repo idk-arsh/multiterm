@@ -1,11 +1,11 @@
-"""Canvas-drawn application chrome: sidebar, header, tab strip, command bar,
-status bar and pane headers. Every surface is painted by hand so the whole
-window shares one visual language."""
+"""Canvas-drawn application chrome: sidebar, top bar, tab strip, command bar,
+status bar, and the header and footer of every pane card. Every surface is
+painted by hand so the whole window shares one visual language: flat dark
+surfaces, hairline borders, one warm accent per card, nothing glowing."""
 import os
 import tkinter as tk
-import tkinter.font as tkfont
 
-from . import gfx, theme, ui
+from . import gfx, theme
 from .theme import UI, mix
 from .ui import px
 
@@ -19,17 +19,54 @@ def f(size, bold=False):
 
 def apply_scale():
     """Re-derive every structural size for the current display scale."""
-    Sidebar.WIDTH = px(252)
-    Sidebar.ROW_WS = px(36)
-    Sidebar.ROW_FOLDER = px(31)
-    HeaderBar.H = px(60)
-    TabStrip.H = px(44)
-    PaneHeader.H = px(32)
-    CommandBar.H = px(62)
-    StatusBar.H = px(30)
+    Sidebar.WIDTH = px(240)
+    Sidebar.ROW_WS = px(34)
+    Sidebar.ROW_FOLDER = px(30)
+    Sidebar.ROW_SECTION = px(30)
+    HeaderBar.H = px(50)
+    TabStrip.H = px(40)
+    PaneHeader.H = px(36)
+    PaneFooter.H = px(28)
+    CommandBar.H = px(58)
+    StatusBar.H = px(28)
 
 
 measure = gfx.measure
+
+LAYOUT_LABELS = {"Auto": "Auto", "Columns": "Columns", "Rows": "Rows",
+                 "2 x 2": "Grid"}
+
+
+def fit(text, size, max_w, bold=False):
+    """Truncate with an ellipsis so the label really fits in max_w pixels."""
+    if max_w <= 0:
+        return ""
+    if measure(text, size, bold) <= max_w:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if measure(text[:mid] + "…", size, bold) <= max_w:
+            lo = mid
+        else:
+            hi = mid - 1
+    return (text[:lo] + "…") if lo else ""
+
+
+def short_path(path, limit=40):
+    """~/dev/project style path, trimmed from the left at a separator."""
+    if not path:
+        return ""
+    home = os.path.expanduser("~")
+    p = path
+    if os.path.normcase(p).startswith(os.path.normcase(home)):
+        p = "~" + p[len(home):]
+    p = p.replace("\\", "/")
+    if len(p) <= limit:
+        return p
+    tail = p[-(limit - 1):]
+    cut = tail.find("/")
+    return "…" + (tail[cut:] if 0 <= cut < len(tail) - 1 else tail)
 
 
 class _HitCanvas(tk.Canvas):
@@ -90,29 +127,66 @@ class _HitCanvas(tk.Canvas):
             return "hover"
         return "idle"
 
+    def _ibtn(self, x, cy, key, draw, size, w=None, tone=None):
+        """Square icon button with its left edge at x. Returns the right edge."""
+        w = w or px(28)
+        st = self.state(key)
+        if st != "idle":
+            gfx.round_rect(self, x, cy - w / 2, x + w, cy + w / 2, px(7),
+                           fill=UI["raised"], outline="")
+        col = tone or (UI["text"] if st != "idle" else UI["muted"])
+        draw(self, x + w / 2, cy, size, col)
+        self.add_hit(x, cy - w / 2, x + w, cy + w / 2, key)
+        return x + w
+
+    def _ibtn_r(self, right, cy, key, draw, size, w=None, tone=None):
+        """Same, anchored by its right edge. Returns the left edge."""
+        w = w or px(28)
+        self._ibtn(right - w, cy, key, draw, size, w, tone)
+        return right - w
+
 
 # --------------------------------------------------------------------- side
 class Sidebar(_HitCanvas):
-    """Workspaces and the folders inside them."""
+    """Workspaces and the folders inside them. Pinned ones sit on top."""
 
-    WIDTH = 252
-    ROW_WS = 36
-    ROW_FOLDER = 31
+    WIDTH = 240
+    ROW_WS = 34
+    ROW_FOLDER = 30
+    ROW_SECTION = 30
 
     def __init__(self, master, store, callbacks):
-        super().__init__(master, width=self.WIDTH, bg=UI["sidebar_top"])
+        super().__init__(master, width=self.WIDTH, bg=UI["sidebar"])
         self.store = store
         self.cb = callbacks
         self.offset = 0
         self.active_ws = None
+        self._dirty = False
+        self._content_h = 0
         self.bind("<MouseWheel>", self._wheel)
         self.bind("<Button-3>", self._context)
         self.bind("<Double-Button-1>", self._double)
 
+    def mark_dirty(self):
+        """Redraw once, soon. Used when the set of open folders changes."""
+        if not self._dirty:
+            self._dirty = True
+            self.after_idle(self._flush)
+
+    def _flush(self):
+        self._dirty = False
+        try:
+            self.redraw()
+        except tk.TclError:
+            pass
+
     # ------------------------------------------------------------ geometry
     def rows(self):
         out = [("title", None, None)]
-        for ws in self.store.items:
+        pinned = [w for w in self.store.items if getattr(w, "pinned", False)]
+        rest = [w for w in self.store.items if not getattr(w, "pinned", False)]
+
+        def emit(ws):
             out.append(("ws", ws, None))
             if ws.expanded:
                 entries = ws.entries()
@@ -120,12 +194,28 @@ class Sidebar(_HitCanvas):
                     out.append(("folder", ws, p))
                 if not entries:
                     out.append(("empty", ws, None))
+
+        if pinned:
+            out.append(("section", None, "Pinned"))
+            for w in pinned:
+                emit(w)
+            if rest:
+                out.append(("section", None, "Folders"))
+        for w in rest:
+            emit(w)
         out.append(("add", None, None))
         return out
 
     def _row_h(self, kind):
-        return {"title": 42, "ws": self.ROW_WS, "folder": self.ROW_FOLDER,
-                "empty": 26, "add": 48}[kind]
+        return {"title": px(46), "section": self.ROW_SECTION,
+                "ws": self.ROW_WS, "folder": self.ROW_FOLDER,
+                "empty": px(24), "add": px(40)}[kind]
+
+    def _open_paths(self):
+        try:
+            return self.cb["open_paths"]() if "open_paths" in self.cb else set()
+        except Exception:                              # noqa: BLE001
+            return set()
 
     # ------------------------------------------------------------- drawing
     def redraw(self):
@@ -133,14 +223,10 @@ class Sidebar(_HitCanvas):
         self._hits = []
         w = self.winfo_width() or self.WIDTH
         h = self.winfo_height() or 600
-        gfx.vgrad(self, 0, 0, w, h, UI["sidebar_top"], UI["sidebar_bot"], 30)
-        # depth: the content sits "above" the sidebar
-        for i in range(6):
-            self.create_rectangle(w - 6 + i, 0, w - 5 + i, h, outline="",
-                                  fill=mix(UI["sidebar_bot"], "#000000",
-                                           0.22 * (i + 1) / 6))
-        self.create_line(w - 1, 0, w - 1, h, fill=UI["border"])
+        self.create_rectangle(0, 0, w, h, fill=UI["sidebar"], outline="")
+        self.create_line(w - 1, 0, w - 1, h, fill=UI["border_soft"])
 
+        self._open = self._open_paths()
         y = -self.offset
         for kind, ws, path in self.rows():
             rh = self._row_h(kind)
@@ -149,115 +235,116 @@ class Sidebar(_HitCanvas):
             y += rh
         self._content_h = y + self.offset
 
-        # top fade so scrolled rows slide under the title
-        gfx.vgrad(self, 0, 0, w, 38, UI["sidebar_top"], UI["sidebar_top"], 2)
-        self._draw_title(w, 0, 38, None, None)
+        # the title stays put while the list scrolls under it
+        th = self._row_h("title")
+        self.create_rectangle(0, 0, w - 1, th - px(4), fill=UI["sidebar"],
+                              outline="")
+        self._draw_title(w, 0, th, None, None)
 
     def _draw_title(self, w, y, h, _ws, _p):
-        self.create_text(px(16), y + h / 2, text="WORKSPACES", anchor="w",
-                         fill=UI["muted"], font=f(8, True))
-        key = ("add_ws", None)
-        st = self.state(key)
-        cx, cy = w - px(20), y + h / 2
-        if st != "idle":
-            self.create_oval(cx - 11, cy - 11, cx + 11, cy + 11,
-                             fill=UI["raised"], outline="")
-        gfx.icon_plus(self, cx, cy, 5,
-                      UI["text"] if st != "idle" else UI["muted"])
-        self.add_hit(cx - 12, cy - 12, cx + 12, cy + 12, key)
+        self.create_text(px(16), y + h / 2, text="Workspaces", anchor="w",
+                         fill=UI["text_dim"], font=f(10))
+        self._ibtn_r(w - px(10), y + h / 2, ("add_ws", None), gfx.icon_plus,
+                     px(5), w=px(26))
+
+    def _draw_section(self, w, y, h, _ws, label):
+        self.create_text(px(16), y + h / 2 + px(3), text=label, anchor="w",
+                         fill=UI["muted"], font=f(9))
 
     def _draw_ws(self, w, y, h, ws, _p):
         key = ("ws", ws)
         st = self.state(key)
-        active = ws is self.active_ws
-        if active:
-            gfx.round_rect(self, 6, y + 1, w - 10, y + h - 1, 10,
-                           fill=UI["raised"], outline="")
-            gfx.round_rect(self, 6, y + 7, 9, y + h - 7, 2,
-                           fill=UI["accent"], outline="")
-        elif st != "idle":
-            gfx.round_rect(self, 6, y + 1, w - 10, y + h - 1, 10,
-                           fill=mix(UI["sidebar_top"], UI["raised"], 0.75),
-                           outline="")
-        cy = y + h / 2
-        gfx.icon_chevron(self, px(22), cy, px(4), UI["muted"], down=ws.expanded)
-        gfx.icon_folder(self, px(33), cy - px(7), px(14),
-                        UI["accent"] if active else UI["text_dim"],
-                        open_=ws.expanded)
-        missing = not ws.exists()
-        self.create_text(px(55), cy, text=ws.name, anchor="w",
-                         fill=UI["err"] if missing else
-                         (UI["text"] if (active or st != "idle") else UI["text_dim"]),
-                         font=f(10, active))
-        self.add_hit(6, y, w - 34, y + h, key)
-
         okey = ("open_ws", ws)
         ost = self.state(okey)
-        if st == "idle" and ost == "idle" and not active:
-            try:
-                n = len(ws.entries())
-            except Exception:                          # noqa: BLE001
-                n = 0
-            if n:
-                self.create_text(w - 22, cy, text=str(n), anchor="e",
-                                 fill=UI["muted"], font=f(9))
+        active = ws is self.active_ws
+        if active:
+            gfx.round_rect(self, px(8), y + 2, w - px(8), y + h - 2, px(8),
+                           fill=UI["raised"], outline="")
+        elif st != "idle" or ost != "idle":
+            gfx.round_rect(self, px(8), y + 2, w - px(8), y + h - 2, px(8),
+                           fill=mix(UI["sidebar"], UI["raised"], 0.6), outline="")
+        cy = y + h / 2
+        gfx.icon_chevron(self, px(20), cy, px(3.5), UI["muted"], down=ws.expanded)
+        missing = not ws.exists()
+        try:
+            n = len(ws.entries())
+        except Exception:                              # noqa: BLE001
+            n = 0
+        right_w = px(40)
+        name = fit(ws.name, 10, w - px(32) - right_w - px(12), True)
+        self.create_text(px(32), cy, text=name, anchor="w",
+                         fill=UI["err"] if missing else UI["text"],
+                         font=f(10, True))
+        self.add_hit(px(8), y, w - right_w, y + h, key)
+
         if st != "idle" or ost != "idle" or active:
-            bx = w - 26
+            # open-everything arrow replaces the count while you are near
+            bx = w - px(22)
             if ost != "idle":
-                self.create_oval(bx - 11, cy - 11, bx + 11, cy + 11,
-                                 fill=UI["accent_dim"], outline="")
-            col = UI["text"] if ost != "idle" else UI["muted"]
-            self.create_polygon(bx - 4, cy - 5, bx + 5, cy, bx - 4, cy + 5,
-                                fill=col, outline="")
-            self.add_hit(bx - 12, cy - 12, bx + 12, cy + 12, okey)
+                gfx.round_rect(self, bx - px(11), cy - px(11), bx + px(11),
+                               cy + px(11), px(6), fill=UI["border"], outline="")
+            col = UI["text"] if ost != "idle" else UI["text_dim"]
+            self.create_polygon(bx - px(3), cy - px(5), bx + px(4), cy,
+                                bx - px(3), cy + px(5), fill=col, outline="")
+            self.add_hit(bx - px(12), y, bx + px(12), y + h, okey)
+        elif n:
+            label = str(n)
+            bw = measure(label, 8) + px(12)
+            gfx.round_rect(self, w - px(14) - bw, cy - px(8), w - px(14),
+                           cy + px(8), px(5), fill=UI["panel"], outline="")
+            self.create_text(w - px(14) - bw / 2, cy, text=label,
+                             fill=UI["muted"], font=f(8))
 
     def _draw_folder(self, w, y, h, ws, path):
         key = ("folder", ws, path)
         st = self.state(key)
         if st != "idle":
-            gfx.round_rect(self, 14, y + 1, w - 10, y + h - 1, 7,
-                           fill=mix(UI["sidebar_top"], UI["raised"], 0.85),
-                           outline="")
+            gfx.round_rect(self, px(8), y + 1, w - px(8), y + h - 1, px(7),
+                           fill=mix(UI["sidebar"], UI["raised"], 0.6), outline="")
         cy = y + h / 2
-        gfx.icon_folder(self, px(40), cy - px(6), px(12),
-                        UI["text_dim"] if st != "idle" else UI["muted"])
+        is_open = os.path.normcase(os.path.abspath(path)) in self._open
+        r = px(2.5)
+        self.create_oval(px(37) - r, cy - r, px(37) + r, cy + r,
+                         fill=UI["ok"] if is_open else UI["border_hi"],
+                         outline="")
         name = os.path.basename(path.rstrip("\\/")) or path
-        if len(name) > 18:
-            name = name[:17] + "…"
-        self.create_text(px(58), cy, text=name, anchor="w",
-                         fill=UI["text"] if st != "idle" else UI["text_dim"],
-                         font=f(10))
         runs = ws.command_for(path) if hasattr(ws, "command_for") else ""
+        right_w = px(28)
+        chip_w = 0
+        if st == "idle" and runs:
+            label = fit(runs, 8, px(78))
+            chip_w = measure(label, 8) + px(12)
+            gfx.round_rect(self, w - px(14) - chip_w, cy - px(8), w - px(14),
+                           cy + px(8), px(5), fill=UI["panel"], outline="")
+            self.create_text(w - px(14) - chip_w / 2, cy, text=label,
+                             fill=UI["muted"], font=f(8))
+            right_w = chip_w + px(8)
+        self.create_text(px(48), cy,
+                         text=fit(name, 10, w - px(48) - right_w - px(12)),
+                         anchor="w",
+                         fill=UI["text"] if (st != "idle" or is_open)
+                         else UI["text_dim"], font=f(10))
         if st != "idle":
-            gfx.icon_plus(self, w - px(24), cy, px(5), UI["accent"])
-        elif runs:
-            # this folder starts something on its own, so show what
-            label = runs if len(runs) <= 16 else runs[:15] + "…"
-            tw = measure(label, 8) + px(14)
-            gfx.round_rect(self, w - px(16) - tw, cy - px(9),
-                           w - px(16), cy + px(9), px(6),
-                           fill=mix(UI["sidebar_top"], UI["accent"], 0.18),
-                           outline="")
-            self.create_text(w - px(16) - tw / 2, cy, text=label,
-                             fill=UI["accent"], font=f(8))
-        self.add_hit(14, y, w - 10, y + h, key)
+            gfx.icon_plus(self, w - px(22), cy, px(4.5), UI["text_dim"])
+        self.add_hit(px(8), y, w - px(8), y + h, key)
 
     def _draw_empty(self, w, y, h, _ws, _p):
-        self.create_text(px(58), y + h / 2, text="no sub-folders", anchor="w",
+        self.create_text(px(48), y + h / 2, text="no sub-folders", anchor="w",
                          fill=UI["muted"], font=f(9))
 
     def _draw_add(self, w, y, h, _ws, _p):
         key = ("add_ws", None)
         st = self.state(key)
-        gfx.round_rect(self, 12, y + 6, w - 16, y + h - 8, 9,
-                       fill=UI["raised"] if st != "idle" else "",
-                       outline=UI["border"], width=1)
-        cy = y + (h - 2) / 2
-        gfx.icon_plus(self, px(32), cy, px(5), UI["accent"])
-        self.create_text(px(46), cy, text="Add workspace", anchor="w",
-                         fill=UI["text"] if st != "idle" else UI["text_dim"],
-                         font=f(10))
-        self.add_hit(12, y + 4, w - 16, y + h - 6, key)
+        if st != "idle":
+            gfx.round_rect(self, px(8), y + px(4), w - px(8), y + h - px(4),
+                           px(8), fill=mix(UI["sidebar"], UI["raised"], 0.6),
+                           outline="")
+        cy = y + h / 2
+        col = UI["text"] if st != "idle" else UI["muted"]
+        gfx.icon_plus(self, px(21), cy, px(4.5), col)
+        self.create_text(px(34), cy, text="Add workspace", anchor="w",
+                         fill=col, font=f(10))
+        self.add_hit(px(8), y + px(2), w - px(8), y + h - px(2), key)
 
     # --------------------------------------------------------- interaction
     def activate(self, key, _event):
@@ -296,7 +383,7 @@ class Sidebar(_HitCanvas):
 
     def _wheel(self, e):
         h = self.winfo_height()
-        content = getattr(self, "_content_h", h)
+        content = self._content_h or h
         if content <= h:
             return "break"
         self.offset = max(0, min(content - h + 12,
@@ -305,9 +392,12 @@ class Sidebar(_HitCanvas):
         return "break"
 
 
-# ------------------------------------------------------------------- header
+# ------------------------------------------------------------------ top bar
 class HeaderBar(_HitCanvas):
-    H = 60
+    """App mark and sidebar toggle on the left, the layout switch in the
+    middle, shell picker / broadcast / new pane / new tab / menu on the right."""
+
+    H = 50
 
     def __init__(self, master, app):
         super().__init__(master, height=self.H, bg=UI["chrome"])
@@ -318,139 +408,110 @@ class HeaderBar(_HitCanvas):
         self.delete("all")
         self._hits = []
         w = self.winfo_width() or 1200
-        gfx.vgrad(self, 0, 0, w, self.H, UI["chrome"], UI["chrome_lo"], 16)
-
+        cy = self.H / 2
+        self.create_rectangle(0, 0, w, self.H, fill=UI["chrome"], outline="")
         self.create_line(0, self.H - 1, w, self.H - 1, fill=UI["border_soft"])
-        x = px(18)
-        gfx.logo(self, x, self.H / 2 - px(12), px(24))
-        x += px(34)
-        # the wordmark and workspace name only appear when there is room
-        show_word = w >= px(1010)
-        show_sub = w >= px(1180) and bool(self.subtitle)
-        if show_word:
-            name_w = measure("MultiTerm", 12, True)
-            if show_sub:
-                sub = self.subtitle
-                self.create_text(x, self.H / 2 - px(6), text="MultiTerm",
-                                 anchor="w", fill=UI["text"], font=f(12, True))
-                self.create_text(x, self.H / 2 + px(8), text=sub, anchor="w",
-                                 fill=UI["muted"], font=f(9))
-                x += max(name_w, measure(sub, 9)) + px(22)
-            else:
-                self.create_text(x, self.H / 2, text="MultiTerm", anchor="w",
-                                 fill=UI["text"], font=f(12, True))
-                x += name_w + px(22)
 
-        x = self._divider(x)
-        x = self._pill(x, ("new_pane", None), "Pane", primary=True,
-                       plus=True) + px(8)
-        x = self._pill(x, ("new_tab", None), "Tab", plus=True) + 10
-        x = self._divider(x)
+        # ---- left: mark, name, sidebar toggle
+        x = px(16)
+        gfx.logo(self, x, cy - px(10), px(20))
+        x += px(28)
+        if w >= px(1000):
+            self.create_text(x, cy, text="MultiTerm", anchor="w",
+                             fill=UI["text"], font=f(11, True))
+            x += measure("MultiTerm", 11, True) + px(10)
+        x = self._ibtn(x + px(4), cy, ("sidebar", None), gfx.icon_sidebar, px(7))
+        left_end = x + px(8)
 
-        # layout segmented control
-        seg_w = 4 * px(30) + px(8)
-        gfx.round_rect(self, x, self.H / 2 - 15, x + seg_w, self.H / 2 + 15, 9,
-                       fill=UI["sunken"], outline=UI["border_soft"])
-        cur = self.app.layout_var.get()
-        for i, (name, _g, _t) in enumerate(self.app.LAYOUTS):
-            bx = x + px(4) + i * px(30)
-            key = ("layout", name)
-            on = name == cur
-            st = self.state(key)
-            if on:
-                gfx.round_rect(self, bx, self.H / 2 - 11, bx + 30, self.H / 2 + 11,
-                               7, fill=UI["accent_dim"], outline="")
-            elif st != "idle":
-                gfx.round_rect(self, bx, self.H / 2 - 11, bx + 30, self.H / 2 + 11,
-                               7, fill=UI["raised"], outline="")
-            gfx.icon_layout(self, bx + px(8), self.H / 2 - px(7), px(14),
-                            UI["text"] if on or st != "idle" else UI["muted"], name)
-            self.add_hit(bx, self.H / 2 - 13, bx + 30, self.H / 2 + 13, key)
-        x += seg_w + 10
+        # ---- right cluster, laid out from the edge inwards
+        rx = w - px(12)
+        rx = self._ibtn_r(rx, cy, ("menu", None), gfx.icon_dots, px(5))
+        rx = self._ibtn_r(rx - px(2), cy, ("new_tab", None), gfx.icon_tab, px(7))
+        rx = self._ibtn_r(rx - px(2), cy, ("new_pane", None), gfx.icon_plus, px(5))
+        self.create_line(rx - px(8), cy - px(9), rx - px(8), cy + px(9),
+                         fill=UI["border"])
+        rx -= px(16)
 
-        # broadcast toggle
         on = self.app.broadcast.get()
         key = ("broadcast", None)
         st = self.state(key)
         wide = w >= px(900)
-        bw = (measure("Broadcast", 10, True) + px(52)) if wide else px(40)
-        y0, y1 = self.H / 2 - px(15), self.H / 2 + px(15)
+        label = "Broadcast"
+        bw = (measure(label, 10, True) + px(44)) if wide else px(32)
+        y0, y1 = cy - px(14), cy + px(14)
+        bx = rx - bw
         if on:
-            gfx.round_vgrad(self, x, y0, x + bw, y1, 12,
-                            mix(UI["accent"], "#FFFFFF", 0.10), UI["accent2"])
+            gfx.round_rect(self, bx, y0, rx, y1, px(8),
+                           fill=mix(UI["chrome"], UI["accent"], 0.22),
+                           outline=mix(UI["chrome"], UI["accent"], 0.5))
+            col = UI["text"]
         else:
-            gfx.round_rect(self, x, y0, x + bw, y1, 12,
+            gfx.round_rect(self, bx, y0, rx, y1, px(8),
                            fill=UI["raised"] if st != "idle" else "",
                            outline=UI["border"])
-        col = "#FFFFFF" if on else (UI["text"] if st != "idle" else UI["text_dim"])
-        gfx.icon_broadcast(self, x + (px(20) if wide else bw / 2),
-                           self.H / 2, px(8), col)
+            col = UI["text"] if st != "idle" else UI["text_dim"]
+        gfx.icon_broadcast(self, bx + (px(16) if wide else bw / 2), cy, px(7),
+                           UI["accent"] if on else col)
         if wide:
-            self.create_text(x + px(36), self.H / 2, text="Broadcast", anchor="w",
+            self.create_text(bx + px(28), cy, text=label, anchor="w",
                              fill=col, font=f(10, on))
-        self.add_hit(x, y0, x + bw, y1, key)
+        self.add_hit(bx, y0, rx, y1, key)
+        rx = bx - px(8)
 
-        # shell picker (right)
         label = self.app.shell_var.get()
         key = ("shell", None)
         st = self.state(key)
-        pw = measure(label, 10) + px(44)
-        sx = w - pw - px(14)
-        gfx.round_rect(self, sx, y0, sx + pw, y1, px(12),
+        pw = measure(label, 10) + px(40)
+        sx = rx - pw
+        gfx.round_rect(self, sx, y0, rx, y1, px(8),
                        fill=UI["raised"] if st != "idle" else UI["panel"],
                        outline=UI["border"])
-        self.create_text(sx + px(12), self.H / 2, text=label, anchor="w",
-                         fill=UI["text_dim"] if st == "idle" else UI["text"],
+        self.create_text(sx + px(12), cy, text=label, anchor="w",
+                         fill=UI["text"] if st != "idle" else UI["text_dim"],
                          font=f(10))
-        gfx.icon_chevron(self, sx + pw - px(13), self.H / 2, px(4), UI["muted"],
-                         down=True)
-        self.add_hit(sx, y0, sx + pw, y1, key)
-        self._icon_btn(sx - px(42), ("menu", None), gfx.icon_menu, px(7))
-        if w >= px(1320):
-            self.create_text(sx - px(52), self.H / 2, text="new panes use",
-                             anchor="e", fill=UI["muted"], font=f(9))
+        gfx.icon_chevron(self, rx - px(13), cy, px(3.5), UI["muted"], down=True)
+        self.add_hit(sx, y0, rx, y1, key)
+        right_start = sx - px(10)
 
-    def _divider(self, x):
-        self.create_line(x + 6, 14, x + 6, self.H - 14, fill=UI["border"])
-        return x + 14
-
-    def _icon_btn(self, x, key, draw, size):
-        st = self.state(key)
-        cy = self.H / 2
-        if st != "idle":
-            gfx.round_rect(self, x, cy - 15, x + 32, cy + 15, 9,
-                           fill=UI["raised"], outline="")
-        draw(self, x + 16, cy, size,
-             UI["text"] if st != "idle" else UI["text_dim"])
-        self.add_hit(x, cy - 15, x + 32, cy + 15, key)
-        return x + 32
-
-    def _pill(self, x, key, label, primary=False, plus=False):
-        st = self.state(key)
-        w = measure(label, 10, primary) + px(28) + (px(14) if plus else 0)
-        y0, y1 = self.H / 2 - px(15), self.H / 2 + px(15)
-        if primary:
-            lift = 0.14 if st == "hover" else 0.0
-            dark = 0.18 if st == "press" else 0.0
-            top = mix(mix(UI["accent"], "#FFFFFF", 0.16 + lift), "#000000", dark)
-            bot = mix(mix(UI["accent2"], "#FFFFFF", lift), "#000000", dark)
-            gfx.round_rect(self, x, y0 + 2, x + w, y1 + 2, 10,
-                           fill=mix(UI["chrome"], UI["accent"], 0.22), outline="")
-            gfx.round_vgrad(self, x, y0, x + w, y1, 12, top, bot)
-            fg = "#FFFFFF"
+        # ---- centre: layout switch, text if it fits, glyphs otherwise
+        cur = self.app.layout_var.get()
+        items = [(name, LAYOUT_LABELS.get(name, name)) for name, _g, _t in
+                 self.app.LAYOUTS]
+        text_ws = [measure(lbl, 10) + px(22) for _n, lbl in items]
+        seg_text = sum(text_ws) + px(8)
+        seg_icon = len(items) * px(32) + px(8)
+        room = right_start - left_end
+        if seg_text <= room:
+            widths, seg_w, glyphs = text_ws, seg_text, False
+        elif seg_icon <= room:
+            widths, seg_w, glyphs = [px(32)] * len(items), seg_icon, True
         else:
-            gfx.round_rect(self, x, y0, x + w, y1, 12,
-                           fill=UI["raised"] if st != "idle" else "",
-                           outline=UI["border"])
-            fg = UI["text"] if st != "idle" else UI["text_dim"]
-        tx = x + 14
-        if plus:
-            gfx.icon_plus(self, tx, self.H / 2, 5, fg)
-            tx += 12
-        self.create_text(tx, self.H / 2, text=label, anchor="w", fill=fg,
-                         font=f(10, primary))
-        self.add_hit(x, y0, x + w, y1, key)
-        return x + w
+            return
+        sx0 = (w - seg_w) / 2
+        if sx0 < left_end or sx0 + seg_w > right_start:
+            sx0 = left_end
+        gfx.round_rect(self, sx0, y0, sx0 + seg_w, y1, px(8), fill=UI["panel"],
+                       outline=UI["border_soft"])
+        bx = sx0 + px(4)
+        for (name, lbl), sw in zip(items, widths):
+            key = ("layout", name)
+            on = name == cur
+            st = self.state(key)
+            if on:
+                gfx.round_rect(self, bx, y0 + px(3), bx + sw, y1 - px(3), px(6),
+                               fill=UI["raised"], outline="")
+            elif st != "idle":
+                gfx.round_rect(self, bx, y0 + px(3), bx + sw, y1 - px(3), px(6),
+                               fill=mix(UI["panel"], UI["raised"], 0.5), outline="")
+            col = UI["text"] if (on or st != "idle") else UI["muted"]
+            if glyphs:
+                gfx.icon_layout(self, bx + sw / 2 - px(7), cy - px(7), px(14),
+                                col, name)
+            else:
+                self.create_text(bx + sw / 2, cy, text=lbl, fill=col,
+                                 font=f(10, on))
+            self.add_hit(bx, y0, bx + sw, y1, key)
+            bx += sw
 
     def activate(self, key, event):
         kind = key[0]
@@ -466,56 +527,34 @@ class HeaderBar(_HitCanvas):
             self.app.post_shell_menu(event.x_root, event.y_root)
         elif kind == "menu":
             self.app.post_main_menu(event.x_root, event.y_root)
+        elif kind == "sidebar":
+            self.app.toggle_sidebar()
 
 
 # ---------------------------------------------------------------- tab strip
 class TabStrip(_HitCanvas):
-    H = 44
+    H = 40
 
     def __init__(self, master, app):
         super().__init__(master, height=self.H, bg=UI["bg"])
         self.app = app
         self.tabs = []
         self.active = None
-        self._underline = None          # animated x span
         self.bind("<Double-Button-1>", self._double)
 
     def set_tabs(self, tabs, active, animate=True):
-        moved = active != self.active
         self.tabs, self.active = list(tabs), active
         self.redraw()
-        if moved and animate:
-            self.app.anim.add("tab-underline", 180, self._tween_underline)
-
-    def _tab_span(self, key):
-        x = 10
-        for k, label in self.tabs:
-            w = self._tab_w(label)
-            if k == key:
-                return x + 14, x + w - 14
-            x += w + 5
-        return None
 
     def _tab_w(self, label):
-        text = label if len(label) <= 20 else label[:19] + "…"
-        return max(px(118), min(px(250), measure(text, 10, True) + px(78)))
-
-    def _tween_underline(self, t):
-        target = self._tab_span(self.active)
-        if not target:
-            return
-        if self._underline is None:
-            self._underline = target
-        a, b = self._underline
-        self._underline = (a + (target[0] - a) * t, b + (target[1] - b) * t)
-        self.redraw(skip_anim=True)
-        if t >= 1.0:
-            self._underline = target
+        text = label if len(label) <= 22 else label[:21] + "…"
+        return max(px(110), min(px(240), measure(text, 10) + px(66)))
 
     def redraw(self, skip_anim=False):
         self.delete("all")
         self._hits = []
         w = self.winfo_width() or 1000
+        cy = self.H / 2
         self.create_rectangle(0, 0, w, self.H, fill=UI["bg"], outline="")
 
         x = px(10)
@@ -524,52 +563,33 @@ class TabStrip(_HitCanvas):
             st = self.state(("tab", key))
             hover = st != "idle" or self.state(("close", key)) != "idle"
             tw = self._tab_w(label)
-            text = label if len(label) <= 20 else label[:19] + "…"
-            y0, y1 = px(5), self.H - px(3)
+            text = label if len(label) <= 22 else label[:21] + "…"
+            y0, y1 = px(6), self.H - px(6)
             if active:
-                gfx.round_rect(self, x, y0, x + tw, y1 + 6, 12,
-                               fill=UI["panel"], outline="")
-                gfx.round_rect(self, x, y0, x + tw, y0 + 18, 10,
-                               fill=mix(UI["panel"], UI["raised"], 0.5),
-                               outline="")
-                self.create_rectangle(x, y0 + 10, x + tw, y1 + 6,
-                                      fill=UI["panel"], outline="")
+                gfx.round_rect(self, x, y0, x + tw, y1, px(8), fill=UI["panel"],
+                               outline=UI["border_soft"])
             elif hover:
-                gfx.round_rect(self, x, y0 + 2, x + tw, y1, 9,
-                               fill=mix(UI["bg"], UI["panel"], 0.7), outline="")
-            gfx.icon_terminal(self, x + px(13), self.H / 2 - px(7), px(13),
-                              UI["accent"] if active else UI["muted"])
-            self.create_text(x + px(34), self.H / 2, text=text, anchor="w",
-                             fill=UI["text"] if active else UI["text_dim"],
-                             font=f(10, active))
-            self.add_hit(x, 0, x + tw - 22, self.H, ("tab", key))
+                gfx.round_rect(self, x, y0, x + tw, y1, px(8),
+                               fill=mix(UI["bg"], UI["panel"], 0.6), outline="")
+            gfx.icon_terminal(self, x + px(12), cy - px(6), px(12),
+                              UI["text_dim"] if active else UI["muted"])
+            self.create_text(x + px(30), cy, text=text, anchor="w",
+                             fill=UI["text"] if active else UI["muted"],
+                             font=f(10))
+            self.add_hit(x, 0, x + tw - px(24), self.H, ("tab", key))
             if active or hover:
                 ck = ("close", key)
                 cst = self.state(ck)
-                cx, cy = x + tw - 16, self.H / 2
+                cx = x + tw - px(15)
                 if cst != "idle":
-                    self.create_oval(cx - 9, cy - 9, cx + 9, cy + 9,
-                                     fill=UI["raised"], outline="")
-                gfx.icon_close(self, cx, cy, 4,
+                    gfx.round_rect(self, cx - px(9), cy - px(9), cx + px(9),
+                                   cy + px(9), px(5), fill=UI["raised"], outline="")
+                gfx.icon_close(self, cx, cy, px(3.5),
                                UI["text"] if cst != "idle" else UI["muted"])
-                self.add_hit(cx - 10, cy - 10, cx + 10, cy + 10, ck)
-            x += tw + px(5)
+                self.add_hit(cx - px(10), 0, cx + px(10), self.H, ck)
+            x += tw + px(6)
 
-        nk = ("new", None)
-        st = self.state(nk)
-        if st != "idle":
-            gfx.round_rect(self, x, 8, x + 30, self.H - 6, 8, fill=UI["panel"],
-                           outline="")
-        gfx.icon_plus(self, x + 15, self.H / 2, 5,
-                      UI["text"] if st != "idle" else UI["muted"])
-        self.add_hit(x, 4, x + 30, self.H - 2, nk)
-
-        span = self._underline if (self._underline and not skip_anim is None) \
-            else self._tab_span(self.active)
-        span = self._underline or self._tab_span(self.active)
-        if span:
-            gfx.hgrad(self, span[0], self.H - 3, span[1], self.H - 1,
-                      UI["accent"], UI["accent2"], 24)
+        self._ibtn(x, cy, ("new", None), gfx.icon_plus, px(4.5), w=px(26))
 
     def activate(self, key, event):
         kind = key[0]
@@ -587,98 +607,191 @@ class TabStrip(_HitCanvas):
 
 
 # -------------------------------------------------------------- pane header
-class PaneHeader(_HitCanvas):
-    H = 32
+class _CardEdge(_HitCanvas):
+    """Shared by the pane header and footer: the canvas background is the
+    card's border colour and the card surface is painted on top with two
+    rounded corners, so the whole pane reads as one rounded card."""
+
+    RADIUS = 10
+
+    def __init__(self, master, pane, height):
+        super().__init__(master, height=height, bg=master["bg"])
+        self.pane = pane
+
+    def card_color(self):
+        return self.pane.view.bg
+
+    def _paint_surface(self, w, h, top):
+        r = px(self.RADIUS)
+        if top:
+            gfx.round_rect(self, 0, 0, w, h + r, r, fill=self.card_color(),
+                           outline="")
+        else:
+            gfx.round_rect(self, 0, -r, w, h, r, fill=self.card_color(),
+                           outline="")
+
+
+class PaneHeader(_CardEdge):
+    H = 36
 
     def __init__(self, master, pane):
-        super().__init__(master, height=self.H, bg=UI["panel"])
-        self.pane = pane
+        super().__init__(master, pane, self.H)
         self.active = False
         self.title = pane.session.label
+        self.sub = ""
         self.alive = True
         self.bind("<Button-1>", self._focus_first, add="+")
 
     def _focus_first(self, e):
-        if not self.hit(e.x, e.y):
+        key = self.hit(e.x, e.y)
+        if key is None or key[0] == "reveal":
             self.pane.focus_pane()
 
-    def update_state(self, title, alive, active):
-        if (title, alive, active) == (self.title, self.alive, self.active):
+    def update_state(self, title, alive, active, sub=""):
+        if (title, alive, active, sub) == (self.title, self.alive, self.active,
+                                           self.sub):
             return
-        self.title, self.alive, self.active = title, alive, active
+        self.title, self.alive, self.active, self.sub = title, alive, active, sub
         self.redraw()
-
 
     def redraw(self):
         self.delete("all")
         self._hits = []
         w = self.winfo_width() or 300
-        top = UI["raised"] if self.active else UI["panel"]
-        gfx.vgrad(self, 0, 0, w, self.H, top,
-                  mix(top, UI["sunken"], 0.55), 10)
-        self.create_line(0, self.H - 1, w, self.H - 1, fill=UI["border_soft"])
-        if self.active:
-            gfx.hgrad(self, 0, 0, w, 2, UI["accent"], UI["accent2"], 40)
+        cy = self.H / 2
+        self._paint_surface(w, self.H, top=True)
+        self.add_hit(0, 0, w, self.H, ("reveal", None))
 
-        # the badge carries the shell *and* its state, so no separate dot
-        label, color = theme.badge_for(self.pane.session.label)
-        if not self.alive:
-            color = UI["err"]
-        bw, _bh = gfx.chip(self, px(10), (self.H - px(20)) / 2, label, color,
-                           mix(color, UI["sunken"], 0.82), font=f(8, True),
-                           padx=7, pady=3)
-        x = px(10) + bw + px(10)
-        text = self.title if self.alive else self.title + "   ·  exited"
-        self.create_text(x, self.H / 2, text=text, anchor="w",
+        # actions, right to left: close, split, maximise, menu
+        bx = w - px(8)
+        for key, draw, size in (("close", gfx.icon_close, px(3.8)),
+                                ("split", gfx.icon_plus, px(4.5)),
+                                ("max", gfx.icon_expand, px(4.5)),
+                                ("menu", gfx.icon_dots, px(4.5))):
+            bx = self._ibtn_r(bx, cy, (key, None), draw, size, w=px(24)) - px(2)
+        actions_x = bx - px(4)
+
+        # status dot, shell glyph, title
+        r = px(3)
+        dot = UI["ok"] if self.alive else UI["err"]
+        self.create_oval(px(14) - r, cy - r, px(14) + r, cy + r, fill=dot,
+                         outline="")
+        gfx.icon_terminal(self, px(25), cy - px(6), px(12),
+                          UI["text_dim"] if self.active else UI["muted"])
+        tx = px(44)
+        avail = actions_x - tx
+        title = fit(self.title, 10, avail, self.active)
+        self.create_text(tx, cy, text=title, anchor="w",
                          fill=UI["text"] if self.active else UI["text_dim"],
                          font=f(10, self.active))
+        sub = self.sub if self.alive else "exited"
+        if sub and sub != self.title:
+            sx = tx + measure(title, 10, self.active) + px(8)
+            sub = fit("·  " + sub, 9, actions_x - sx)
+            if sub:
+                self.create_text(sx, cy, text=sub, anchor="w",
+                                 fill=UI["warn"] if not self.alive else UI["muted"],
+                                 font=f(9))
 
-        # actions stay out of the way until the pane is focused or hovered
-        if not (self.active or self._hover or self._pressed):
-            self.create_text(w - px(14), self.H / 2,
-                             text="%d" % (self.pane.index + 1),
-                             anchor="e", fill=UI["muted"], font=f(9))
-            self.add_hit(w - 90, 0, w, self.H, ("reveal", None))
-            return
-        self.add_hit(w - 100, 0, w, self.H, ("reveal", None))
-        bx = w - px(18)
-        for key, draw in (("close", gfx.icon_close),
-                          ("max", gfx.icon_maximize),
-                          ("restart", gfx.icon_restart)):
-            st = self.state((key, None))
-            if st != "idle":
-                self.create_oval(bx - 12, self.H / 2 - 12, bx + 12,
-                                 self.H / 2 + 12,
-                                 fill=UI["err"] if key == "close"
-                                 else UI["border"], outline="")
-            col = UI["text"] if st != "idle" else UI["muted"]
-            draw(self, bx, self.H / 2, 4 if key == "close" else 5, col)
-            self.add_hit(bx - 12, 0, bx + 12, self.H, (key, None))
-            bx -= px(27)
+    def activate(self, key, event):
+        kind = key[0]
+        if kind == "reveal":
+            self.pane.focus_pane()
+        elif kind == "close":
+            self.pane.close()
+        elif kind == "max":
+            self.pane.toggle_max()
+        elif kind == "split":
+            self.pane.split()
+        elif kind == "menu":
+            self.pane.menu(event.x_root, event.y_root)
+
+
+class PaneFooter(_CardEdge):
+    """One line under the terminal: shell and folder on the left, and on the
+    right the folder's startup command as a runnable action, or the grid
+    size when there is none. An exited shell offers Restart instead."""
+
+    H = 28
+
+    def __init__(self, master, pane):
+        super().__init__(master, pane, self.H)
+        self._sig = None
+
+    def refresh(self):
+        s = self.pane.session
+        sig = (s.label, s.cwd, s.cols, s.rows, s.is_alive(), s.exit_code,
+               self.pane.startup_command(), self.pane.active,
+               self._hover, self._pressed, self.winfo_width())
+        if sig != self._sig:
+            self._sig = sig
+            self.redraw()
+
+    def redraw(self):
+        self.delete("all")
+        self._hits = []
+        w = self.winfo_width() or 300
+        cy = self.H / 2 - px(1)
+        self._paint_surface(w, self.H, top=False)
+        s = self.pane.session
+        alive = s.is_alive()
+        cmd = self.pane.startup_command()
+
+        if alive and cmd:
+            action, key = "Run " + fit(cmd, 9, px(110), True), ("run", None)
+        elif not alive:
+            action, key = "Restart", ("restart", None)
+        else:
+            action, key = "%d×%d" % (s.cols, s.rows), None
+        aw = measure(action, 9, key is not None)
+        ax1 = w - px(14)
+        if key:
+            st = self.state(key)
+            col = mix(UI["warm"], "#FFFFFF", 0.25) if st != "idle" else UI["warm"]
+            self.create_text(ax1, cy, text=action, anchor="e", fill=col,
+                             font=f(9, True))
+            self.add_hit(ax1 - aw - px(8), 0, w, self.H, key)
+        else:
+            self.create_text(ax1, cy, text=action, anchor="e", fill=UI["muted"],
+                             font=f(9))
+
+        avail = ax1 - aw - px(14) - px(24)
+        if alive:
+            path = short_path(s.cwd)
+            left = "%s  ·  %s" % (s.label, path)
+            if measure(left, 9) > avail:
+                left = path
+            col = UI["muted"]
+        else:
+            code = s.exit_code
+            left = "exited" if code in (None, 0) else "exited  ·  code %s" % code
+            col = UI["warn"]
+        self.create_text(px(14), cy, anchor="w", fill=col, font=f(9),
+                         text=fit(left, 9, avail))
 
     def activate(self, key, _event):
-        if key[0] == "reveal":
-            self.pane.focus_pane()
-            return
-        {"close": self.pane.close, "max": self.pane.toggle_max,
-         "restart": self.pane.restart}[key[0]]()
+        if key[0] == "run":
+            self.pane.run_startup()
+        elif key[0] == "restart":
+            self.pane.restart()
 
 
 # ------------------------------------------------------------- command bar
 class CommandBar(_HitCanvas):
-    H = 62
+    """One field. Type a line, pick who gets it, press Enter or Run."""
+
+    H = 58
 
     def __init__(self, master, app):
         super().__init__(master, height=self.H, bg=UI["chrome"])
         self.app = app
-        self.entry = tk.Entry(self, bg=UI["sunken"], fg=UI["text"],
-                              insertbackground=UI["accent"], relief="flat", bd=0,
+        self.entry = tk.Entry(self, bg=UI["panel"], fg=UI["text"],
+                              insertbackground=UI["text"], relief="flat", bd=0,
                               highlightthickness=0,
                               font=(theme.mono_family(), 10))
         self.entry_win = self.create_window(0, 0, window=self.entry, anchor="w",
                                             width=10, height=22)
         self.focused = False
-        self.PLACEHOLDER = "type a command, press Enter to run it"
         self._ph_on = False
         self.entry.bind("<FocusIn>", self._focus)
         self.entry.bind("<FocusOut>", self._blur)
@@ -686,6 +799,13 @@ class CommandBar(_HitCanvas):
         self._show_placeholder()
 
     # ------------------------------------------------------------ the text
+    @property
+    def PLACEHOLDER(self):
+        target = self.app.target_var.get()
+        return {"Focused pane": "Run a command in the focused pane",
+                "All panes in tab": "Run a command in every pane of this tab",
+                }.get(target, "Run a command in every pane, every tab")
+
     def _show_placeholder(self):
         if self._ph_on or self.entry.get():
             return
@@ -728,57 +848,59 @@ class CommandBar(_HitCanvas):
         self.delete("field")
         self._hits = []
         w = self.winfo_width() or 900
-        self.delete("bg")
-        gfx.vgrad(self, 0, 0, w, self.H, UI["chrome_lo"], UI["chrome"], 12)
-        self.tag_lower("bg")
+        cy = self.H / 2
+        self.create_rectangle(0, 0, w, self.H, fill=UI["chrome"], outline="",
+                              tags="field")
         self.create_line(0, 0, w, 0, fill=UI["border_soft"], tags="field")
+        if self._ph_on and self.entry.get() != self.PLACEHOLDER:
+            self.entry.delete(0, "end")
+            self.entry.insert(0, self.PLACEHOLDER)
+
+        fx0, fx1 = px(12), w - px(12)
+        y0, y1 = cy - px(18), cy + px(18)
+        gfx.round_rect(self, fx0, y0, fx1, y1, px(10), fill=UI["panel"],
+                       outline=UI["border_hi"] if self.focused else UI["border"],
+                       tags="field")
+
+        # prompt glyph
+        gx = fx0 + px(16)
+        col = UI["text_dim"] if self.focused else UI["muted"]
+        self.create_line(gx - px(4), cy, gx + px(4), cy, fill=col, width=1.4,
+                         capstyle="round", tags="field")
+        self.create_line(gx + px(1), cy - px(3), gx + px(4), cy, gx + px(1),
+                         cy + px(3), fill=col, width=1.4, capstyle="round",
+                         joinstyle="round", tags="field")
+
+        # run action (right), then target picker to its left
+        run = "Run"
+        rw = measure(run, 10, True)
+        rx1 = fx1 - px(16)
+        st = self.state(("send", None))
+        self.create_text(rx1, cy, text=run, anchor="e",
+                         fill=mix(UI["warm"], "#FFFFFF", 0.25) if st != "idle"
+                         else UI["warm"], font=f(10, True), tags="field")
+        self.add_hit(rx1 - rw - px(10), y0, fx1, y1, ("send", None))
 
         target = self.app.target_var.get()
-        tw = measure(target, 10) + px(36)
-        send_w = px(62)
-        right = w - px(14)
-        y0, y1 = self.H / 2 - px(17), self.H / 2 + px(17)
-
-        # send button
-        sx = right - send_w
-        st = self.state(("send", None))
-        lift = 0.14 if st == "hover" else 0.0
-        gfx.round_vgrad(self, sx, y0, right, y1, 12,
-                        mix(UI["accent"], "#FFFFFF", 0.16 + lift),
-                        mix(UI["accent2"], "#FFFFFF", lift), tags="field")
-        self.create_text((sx + right) / 2, self.H / 2, text="Send",
-                         fill="#FFFFFF", font=f(10, True), tags="field")
-        self.add_hit(sx, y0, right, y1, ("send", None))
-
-        # target chip
-        tx = sx - 8 - tw
+        tw = measure(target, 9) + px(22)
+        tx1 = rx1 - rw - px(18)
+        tx0 = tx1 - tw
         tst = self.state(("target", None))
-        gfx.round_rect(self, tx, y0, tx + tw, y1, 12,
-                       fill=UI["raised"] if tst != "idle" else UI["panel"],
-                       outline=UI["border"], tags="field")
-        self.create_text(tx + 12, self.H / 2, text=target, anchor="w",
-                         fill=UI["text_dim"], font=f(10), tags="field")
-        gfx.icon_chevron(self, tx + tw - 13, self.H / 2, 4, UI["muted"],
-                         down=True, tags="field")
-        self.add_hit(tx, y0, tx + tw, y1, ("target", None))
-
-        # entry field
-        fx0, fx1 = px(14), tx - px(10)
-        gfx.round_rect(self, fx0, y0, fx1, y1, 13, fill=UI["sunken"],
-                       outline=UI["accent"] if self.focused else UI["border"],
-                       tags="field")
-        gfx.icon_chevron(self, fx0 + px(17), self.H / 2, px(4), UI["accent"],
+        if tst != "idle":
+            gfx.round_rect(self, tx0, cy - px(11), tx1, cy + px(11), px(6),
+                           fill=UI["raised"], outline="", tags="field")
+        self.create_text(tx0 + px(8), cy, text=target, anchor="w",
+                         fill=UI["text_dim"] if tst != "idle" else UI["muted"],
+                         font=f(9), tags="field")
+        gfx.icon_chevron(self, tx1 - px(9), cy, px(3), UI["muted"], down=True,
                          tags="field")
-        cap_w = px(46)
-        self.coords(self.entry_win, fx0 + 32, self.H / 2)
-        self.itemconfigure(self.entry_win,
-                           width=max(20, fx1 - fx0 - 48 - cap_w))
-        gfx.round_rect(self, fx1 - cap_w - 10, self.H / 2 - 10,
-                       fx1 - 10, self.H / 2 + 10, 6,
-                       fill=mix(UI["sunken"], "#FFFFFF", 0.07),
-                       outline=UI["border"], tags="field")
-        self.create_text(fx1 - cap_w / 2 - 10, self.H / 2, text="Enter",
-                         fill=UI["muted"], font=f(8), tags="field")
+        self.add_hit(tx0, y0, tx1, y1, ("target", None))
+        self.create_line(tx0 - px(10), cy - px(9), tx0 - px(10), cy + px(9),
+                         fill=UI["border"], tags="field")
+
+        ex0 = fx0 + px(34)
+        self.coords(self.entry_win, ex0, cy)
+        self.itemconfigure(self.entry_win, width=max(20, tx0 - px(20) - ex0))
 
     def activate(self, key, event):
         if key[0] == "send":
@@ -789,7 +911,9 @@ class CommandBar(_HitCanvas):
 
 # --------------------------------------------------------------- status bar
 class StatusBar(_HitCanvas):
-    H = 30
+    """Quiet line of facts. A coloured dot in front of each one."""
+
+    H = 28
 
     def __init__(self, master, app):
         super().__init__(master, height=self.H, bg=UI["bg"])
@@ -816,14 +940,20 @@ class StatusBar(_HitCanvas):
     def redraw(self):
         self.delete("all")
         w = self.winfo_width() or 800
+        cy = self.H / 2
         self.create_rectangle(0, 0, w, self.H, fill=UI["bg"], outline="")
-        self.create_line(0, 0, w, 0, fill=UI["border_soft"])
-        x = px(14)
+        right_w = measure(self.right, 9) + px(20) if self.right else 0
+        x = px(16)
         for label, colour in self.chips:
-            cw, _ch = gfx.chip(self, x, (self.H - px(20)) / 2, label, colour,
-                               mix(colour, UI["bg"], 0.86), font=f(9),
-                               padx=9, pady=3, radius=9)
-            x += cw + px(7)
+            avail = w - right_w - x - px(10)
+            if avail < px(30):
+                break
+            label = fit(label, 9, avail - px(14))
+            r = px(2.5)
+            self.create_oval(x - r, cy - r, x + r, cy + r, fill=colour, outline="")
+            self.create_text(x + px(10), cy, text=label, anchor="w",
+                             fill=UI["text_dim"], font=f(9))
+            x += measure(label, 9) + px(30)
         if self.right:
-            self.create_text(w - px(14), self.H / 2, text=self.right, anchor="e",
+            self.create_text(w - px(14), cy, text=self.right, anchor="e",
                              fill=UI["muted"], font=f(9))

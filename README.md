@@ -33,6 +33,8 @@ What is different from a split terminal:
 Everything else (tabs, themes, multiple shells, scrollback, selection) is
 table stakes and is there too.
 
+![A workspace open in MultiTerm: four pane cards, each in its folder, with its startup command ready to run](docs/screenshot.png)
+
 ## Install
 
 Download `MultiTerm.exe` from the [releases page](https://github.com/idk-arsh/multiterm/releases/latest) and run it. It is a single
@@ -50,24 +52,32 @@ python main.py
 
 ## Using it
 
-**Panes.** `+ Pane` adds a terminal to the current tab, up to 12. The layout
-buttons in the header are Auto, Columns, Rows and 2 x 2. Drag a divider to
-resize; double-click one to centre it. `Ctrl+Shift+D` splits the focused pane
-to the right, `Ctrl+Shift+S` splits it down. Once you drag or split, the tab
-is in a custom layout and keeps your shape.
+**Panes.** The `+` in the top bar adds a terminal to the current tab, up to
+12. The layout switch next to the app name is Auto, Columns, Rows and Grid.
+Drag a divider to resize; double-click one to centre it. `Ctrl+Shift+D` splits
+the focused pane to the right, `Ctrl+Shift+S` splits it down, and the `+` on a
+pane's own header splits it along its longer side. Once you drag or split, the
+tab is in a custom layout and keeps your shape.
+
+Every pane is a card. The header carries a status dot, the folder name, what
+is running in it, and four controls: menu, maximise, split, close. The footer
+shows the shell and folder and, when the folder has a startup command, a
+**Run** action that fires it again.
 
 **Workspaces.** The sidebar lists them. `+` adds a folder. Click a workspace
 to expand it, click a folder inside to open a terminal there, press the arrow
 on the workspace row to open every folder in a new tab. Right-click a folder
 to set what it runs on open; the command shows as a chip next to the folder
-and is saved with the workspace.
+and is saved with the workspace. Right-click a workspace to pin it to the top
+of the sidebar. A green dot marks every folder that has a terminal open.
 
-**Broadcast.** The Broadcast button or `Ctrl+Shift+B`. A chip in the status
-bar shows while it is on. It is scoped to the current tab.
+**Broadcast.** The Broadcast button in the top bar or `Ctrl+Shift+B`. The
+button turns blue and the status line says so while it is on. It is scoped to
+the current tab.
 
 **Command bar.** The field at the bottom runs a one-off line against the
-focused pane, all panes in the tab, or all panes everywhere. Up and down
-walk its history.
+focused pane, all panes in the tab, or all panes everywhere. Pick the target
+inside the field, then press Enter or Run. Up and down walk its history.
 
 **Inside a pane.** Drag to select, double-click for a word, right-click copies
 the selection or pastes if there is none. Wheel scrolls; a scrollbar appears
@@ -106,7 +116,7 @@ the terminal emulator and all of the chrome drawn on canvases.
 | `multiterm/widget.py` | Canvas renderer. Repaints only rows the emulator marked dirty. Key encoding, selection, smooth scrolling, overlay scrollbar, find |
 | `multiterm/layout.py` | The split tree: leaves are panes, nodes are splits with a ratio. Dragging a divider changes a ratio |
 | `multiterm/workspace.py` | Workspace model and persistence, including per-folder startup commands |
-| `multiterm/chrome.py` | Sidebar, header, tabs, command bar, status chips, pane headers |
+| `multiterm/chrome.py` | Sidebar, top bar, tabs, command bar, status line, pane headers and footers |
 | `multiterm/gfx.py` | Rounded shapes, gradients, vector icons, text measurement, a small tween animator |
 | `multiterm/ui.py` | Display scaling. One factor drives fonts and layout so nothing clips at 150% |
 | `multiterm/log.py` | Rotating log, crash capture, diagnostics |
@@ -157,10 +167,13 @@ backlog at the time. Help > Copy diagnostics puts a summary on the clipboard.
 ## Known limits
 
 - Windows only. It is built on ConPTY and there is no plan to abstract that.
-- Wide (CJK) characters are treated as single cells.
-- No mouse reporting to applications, so vim and similar are keyboard only.
-- Resizing truncates or pads lines rather than reflowing them.
+- Wide (CJK) characters are treated as single cells ([#2](https://github.com/idk-arsh/multiterm/issues/2)).
+- No mouse reporting to applications, so vim and similar are keyboard only ([#1](https://github.com/idk-arsh/multiterm/issues/1)).
+- Resizing truncates or pads lines rather than reflowing them ([#4](https://github.com/idk-arsh/multiterm/issues/4)).
 - Twelve panes per tab.
+
+Those three are open as good first issues, with a plan in each, if you want
+to take one.
 
 ## Contributing
 

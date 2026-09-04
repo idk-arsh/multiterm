@@ -12,7 +12,8 @@ from . import chrome, gfx, log as mlog, ui
 from . import widget as widget_mod
 from . import layout as mlayout
 from . import theme
-from .chrome import CommandBar, HeaderBar, PaneHeader, Sidebar, StatusBar, TabStrip
+from .chrome import (CommandBar, HeaderBar, PaneFooter, PaneHeader, Sidebar,
+                     StatusBar, TabStrip)
 from .session import Session, discover_shells
 from .theme import UI
 from .widget import TerminalView
@@ -63,25 +64,46 @@ def save_settings(s):
 
 # --------------------------------------------------------------------- pane
 class Pane(tk.Frame):
-    """A terminal card: animated focus border, drawn header, terminal view."""
+    """A terminal card: 1px border that brightens on focus, a drawn header,
+    the terminal view, and a footer with the folder's startup command."""
 
     def __init__(self, master, app, session):
-        super().__init__(master, bg=UI["border_soft"], bd=0, highlightthickness=0)
+        super().__init__(master, bg=UI["border"], bd=0, highlightthickness=0)
         self.app = app
         self.session = session
         self.index = 0
         self.active = False
         self._title = ""
 
-        self.header = PaneHeader(self, self)
-        self.header.pack(fill="x", side="top")
         self.view = TerminalView(self, session, app.settings,
                                  on_focus=app.on_pane_focus)
         self.view.router = app.route_input
-        self.view.pack(fill="both", expand=True, padx=1, pady=(0, 1))
+        self.header = PaneHeader(self, self)
+        self.header.pack(fill="x", side="top", padx=1, pady=(1, 0))
+        self.footer = PaneFooter(self, self)
+        self.footer.pack(fill="x", side="bottom", padx=1, pady=(0, 1))
+        self.view.pack(fill="both", expand=True, padx=1)
 
     def focus_pane(self):
         self.view.focus_terminal()
+
+    def startup_command(self):
+        page = self.master
+        ws = getattr(page, "workspace", None)
+        return ws.command_for(self.session.cwd) if ws else ""
+
+    def run_startup(self):
+        cmd = self.startup_command()
+        if cmd and self.session.is_alive():
+            self.session.write(cmd + "\r")
+            self.view.scroll_to_bottom()
+            self.focus_pane()
+
+    def split(self):
+        self.app.split_pane(self.master._best_direction(self), near=self)
+
+    def menu(self, x, y):
+        self.app.post_pane_menu(self, x, y)
 
     def restart(self):
         self.session.restart()
@@ -100,17 +122,22 @@ class Pane(tk.Frame):
         if active == self.active:
             return
         self.active = active
-        start = UI["border_soft"] if active else UI["accent"]
-        end = UI["accent"] if active else UI["border_soft"]
+        start = UI["border"] if active else UI["border_hi"]
+        end = UI["border_hi"] if active else UI["border"]
         self.view.set_card_bg(end)
         self.app.anim.add(
             "pane-%d" % id(self), 160,
             lambda t: self._safe_border(theme.mix(start, end, t)))
         self.header.update_state(self._title, self.session.is_alive(), active)
+        self.footer.refresh()
 
     def _safe_border(self, color):
         try:
             self.config(bg=color)
+            self.header.config(bg=color)
+            self.footer.config(bg=color)
+            self.header.redraw()
+            self.footer.redraw()
         except tk.TclError:
             pass
 
@@ -119,8 +146,17 @@ class Pane(tk.Frame):
                              "" if self.session.is_alive() else "   ·  exited")
 
     def refresh_header(self):
-        self._title = self.session.display_title()
-        self.header.update_state(self._title, self.session.is_alive(), self.active)
+        s = self.session
+        self._title = s.folder or s.label
+        running = s.display_title()
+        sub = "" if running in (self._title, s.label) else running
+        self.header.update_state(self._title, s.is_alive(), self.active, sub)
+        self.footer.refresh()
+
+    def set_theme(self, name):
+        self.view.set_theme(name)
+        self.header.redraw()
+        self.footer.redraw()
 
 
 # ----------------------------------------------------------------- tab page
@@ -218,7 +254,7 @@ class TabPage(tk.Frame):
     def relayout(self):
         w = max(1, self.winfo_width())
         h = max(1, self.winfo_height())
-        pad = ui.px(3)
+        pad = ui.px(4)
         rects, sashes = [], []
         if self.maximized in self.panes and self.maximized is not None:
             rects = [(self.maximized, pad, pad, w - 2 * pad, h - 2 * pad)]
@@ -235,6 +271,9 @@ class TabPage(tk.Frame):
             p.index = i
             p.refresh_header()
         self.app.refresh_status()
+        sidebar = getattr(self.app, "sidebar", None)
+        if sidebar is not None:
+            sidebar.mark_dirty()
 
     def _place_sashes(self, sashes):
         while len(self._sashes) < len(sashes):
@@ -256,7 +295,7 @@ class TabPage(tk.Frame):
             f.lift()
 
     def _sash_hover(self, sash, on):
-        sash.config(bg=UI["accent"] if on else UI["bg"])
+        sash.config(bg=UI["border_hi"] if on else UI["bg"])
 
     def _sash_press(self, sash, _e):
         self._sash_hover(sash, True)
@@ -448,6 +487,7 @@ class App(tk.Tk):
             "add_workspace": self.add_workspace,
             "menu": self.post_workspace_menu,
             "folder_menu": self.post_folder_menu,
+            "open_paths": self.open_paths,
         })
         if self.settings.get("sidebar", True):
             self.sidebar.pack(side="left", fill="y")
@@ -457,14 +497,15 @@ class App(tk.Tk):
         self.tabstrip = TabStrip(right, self)
         self.tabstrip.pack(fill="x", side="top")
         self.content = tk.Frame(right, bg=UI["bg"])
-        self.content.pack(fill="both", expand=True, padx=5, pady=(0, 4))
+        self.content.pack(fill="both", expand=True, padx=ui.px(8),
+                          pady=(0, ui.px(6)))
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
 
     # --------------------------------------------------------------- menus
     def _menu(self, parent=None):
         return tk.Menu(parent or self, tearoff=0, bg=UI["panel"], fg=UI["text"],
-                       activebackground=UI["accent"], activeforeground="#FFFFFF",
+                       activebackground=UI["raised"], activeforeground=UI["text"],
                        bd=0, relief="flat", activeborderwidth=0)
 
     def _build_menus(self):
@@ -575,6 +616,8 @@ class App(tk.Tk):
         m.add_command(label="New terminal at root",
                       command=lambda: self.open_folder(ws.root, ws))
         m.add_separator()
+        m.add_command(label="Unpin" if ws.pinned else "Pin to top",
+                      command=lambda: self.toggle_pin(ws))
         m.add_command(label="Pin a folder…",
                       command=lambda: self.pin_folder(ws))
         m.add_command(label="Rename…", command=lambda: self.rename_workspace(ws))
@@ -597,6 +640,56 @@ class App(tk.Tk):
                           command=lambda: self.set_folder_command(ws, path, ""))
         self._post(m, x, y)
 
+    def post_pane_menu(self, pane, x, y):
+        s = pane.session
+        m = self._menu()
+        cmd = pane.startup_command()
+        if cmd:
+            m.add_command(label="Run \"%s\"" % cmd[:34], command=pane.run_startup)
+        m.add_command(label="Restart shell", command=pane.restart)
+        m.add_command(label="Clear buffer", command=lambda: self._clear(pane))
+        m.add_command(label="Find in pane", accelerator="Ctrl+F",
+                      command=lambda: (pane.view.toggle_find(), pane.focus_pane()))
+        m.add_separator()
+        m.add_command(label="Split right", accelerator="Ctrl+Shift+D",
+                      command=lambda: self.split_pane("h", near=pane))
+        m.add_command(label="Split down", accelerator="Ctrl+Shift+S",
+                      command=lambda: self.split_pane("v", near=pane))
+        m.add_command(label="Restore pane" if pane.master.maximized is pane
+                      else "Maximise pane", accelerator="Ctrl+Shift+M",
+                      command=pane.toggle_max)
+        m.add_separator()
+        m.add_command(label="Copy folder path",
+                      command=lambda: self._copy_text(s.cwd))
+        page = pane.master
+        if getattr(page, "workspace", None):
+            m.add_command(label=("Change what runs on open…" if cmd
+                                 else "Run a command when this opens…"),
+                          command=lambda: self.set_folder_command(
+                              page.workspace, s.cwd))
+        m.add_separator()
+        m.add_command(label="Close pane", accelerator="Ctrl+Shift+W",
+                      command=pane.close)
+        self._post(m, x, y)
+
+    def _copy_text(self, text):
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.hint("Copied " + text)
+
+    def toggle_pin(self, ws):
+        self.store.set_pinned(ws, not ws.pinned)
+        self.sidebar.redraw()
+
+    def open_paths(self):
+        """Folders that currently have a terminal open, for the sidebar dots."""
+        out = set()
+        for page in self._pages:
+            for p in page.panes:
+                if p.session.is_alive():
+                    out.add(os.path.normcase(os.path.abspath(p.session.cwd)))
+        return out
+
     def set_folder_command(self, ws, path, value=None):
         """The command this folder should run every time the workspace opens."""
         name = os.path.basename(path.rstrip("\\/")) or path
@@ -610,6 +703,9 @@ class App(tk.Tk):
         ws.set_command(path, value)
         self.store.save()
         self.sidebar.redraw()
+        for page in self._pages:
+            for p in page.panes:
+                p.footer.refresh()
         self.hint("%s will run \"%s\" on open" % (name, value.strip())
                   if value.strip() else "%s will not run anything on open" % name)
 
@@ -787,18 +883,19 @@ class App(tk.Tk):
                 return label, argv
         return self.shells[0]
 
-    def split_pane(self, direction):
+    def split_pane(self, direction, near=None):
         """Split the focused pane, keeping every other pane where it is."""
         page = self.current_page()
         if page is None:
             return None
         page.layout = "Custom"
         self.layout_var.set("Custom")
-        pane = self.new_pane(page=page, direction=direction)
+        pane = self.new_pane(page=page, direction=direction, near=near)
         self.header.redraw()
         return pane
 
-    def new_pane(self, page=None, focus=True, cwd=None, direction=None):
+    def new_pane(self, page=None, focus=True, cwd=None, direction=None,
+                 near=None):
         page = page or self.current_page()
         if page is None:
             return None
@@ -815,7 +912,7 @@ class App(tk.Tk):
         if not sess.start():
             self.log.error("shell failed to start: %s (%s)", label, sess.error)
         page.maximized = None
-        pane = page.add_pane(sess, direction=direction)
+        pane = page.add_pane(sess, near=near, direction=direction)
         if focus:
             self.after(60, pane.focus_pane)
         return pane
@@ -852,13 +949,15 @@ class App(tk.Tk):
             self.active_pane.focus_pane()
 
     def clear_pane(self):
-        if not self.active_pane:
-            return
-        scr = self.active_pane.session.screen
+        if self.active_pane:
+            self._clear(self.active_pane)
+
+    def _clear(self, pane):
+        scr = pane.session.screen
         scr.scrollback.clear()
         scr._erase_display(2)
         scr.x = scr.y = 0
-        v = self.active_pane.view
+        v = pane.view
         v.view_offset = v.scroll_target = 0
         v._need_full = True
         v.render()
@@ -1013,7 +1112,7 @@ class App(tk.Tk):
         self.settings["theme"] = name
         for page in self._pages:
             for p in page.panes:
-                p.view.set_theme(name)
+                p.set_theme(name)
 
     def zoom(self, delta):
         size = int(self.settings.get("font_size", 11)) + delta
@@ -1058,7 +1157,8 @@ class App(tk.Tk):
         if page and page.layout == "Custom":
             chips.append(("custom layout", UI["muted"]))
         if self.broadcast.get():
-            chips.append(("BROADCAST · typing goes everywhere", UI["accent"]))
+            chips.append(("Broadcast on · keys go to every pane in this tab",
+                          UI["accent"]))
         self.statusbar.set_chips(chips, right,
                                  "info" if self.broadcast.get() else "ok")
 

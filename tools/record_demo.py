@@ -117,9 +117,14 @@ def main():
 
     # a throwaway project so the recording shows neutral folder names, and a
     # throwaway store so the real workspace list is left alone
-    sandbox = tempfile.mkdtemp(prefix="mt-demo-")
-    ws_mod.STORE_DIR = sandbox
-    ws_mod.STORE_FILE = os.path.join(sandbox, "workspaces.json")
+    # a parent name this long makes the pane footers read ".../dev/acme-platform/api"
+    import shutil
+    base = os.path.join(tempfile.gettempdir(), "mt-demo-recording-tmp")
+    shutil.rmtree(base, ignore_errors=True)
+    sandbox = os.path.join(base, "dev")
+    os.makedirs(sandbox, exist_ok=True)
+    ws_mod.STORE_DIR = base
+    ws_mod.STORE_FILE = os.path.join(base, "workspaces.json")
     project = os.path.join(sandbox, "acme-platform")
     parts = ["api", "web", "worker", "tests"]
     for part in parts:

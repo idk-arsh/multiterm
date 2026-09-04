@@ -218,6 +218,45 @@ def icon_broadcast(cv, cx, cy, s, color, tags=()):
                       width=1.3, tags=tags)
 
 
+def icon_dots(cv, cx, cy, s, color, tags=()):
+    """Three dots in a row: the 'more' affordance."""
+    r = max(1.1, s * 0.24)
+    for dx in (-s * 0.75, 0.0, s * 0.75):
+        cv.create_oval(cx + dx - r, cy - r, cx + dx + r, cy + r, fill=color,
+                       outline="", tags=tags)
+
+
+def icon_expand(cv, cx, cy, s, color, tags=()):
+    """Two diagonal arrows pointing out of the corners (maximise)."""
+    kw = dict(fill=color, width=1.3, capstyle="round", joinstyle="round",
+              tags=tags)
+    a = s * 0.9
+    h = s * 0.55
+    cv.create_line(cx - a, cy + a, cx - a * 0.15, cy + a * 0.15, **kw)
+    cv.create_line(cx - a, cy + a - h, cx - a, cy + a, cx - a + h, cy + a, **kw)
+    cv.create_line(cx + a, cy - a, cx + a * 0.15, cy - a * 0.15, **kw)
+    cv.create_line(cx + a - h, cy - a, cx + a, cy - a, cx + a, cy - a + h, **kw)
+
+
+def icon_sidebar(cv, cx, cy, s, color, tags=()):
+    """Window outline with a left panel."""
+    round_rect(cv, cx - s, cy - s * 0.78, cx + s, cy + s * 0.78, 2.2, fill="",
+               outline=color, width=1.2, tags=tags)
+    cv.create_line(cx - s * 0.3, cy - s * 0.78, cx - s * 0.3, cy + s * 0.78,
+                   fill=color, width=1.2, tags=tags)
+
+
+def icon_tab(cv, cx, cy, s, color, tags=()):
+    """Window outline with a tab notch and a small plus: new tab."""
+    round_rect(cv, cx - s, cy - s * 0.78, cx + s, cy + s * 0.78, 2.2, fill="",
+               outline=color, width=1.2, tags=tags)
+    cv.create_line(cx - s, cy - s * 0.3, cx + s, cy - s * 0.3, fill=color,
+                   width=1.2, tags=tags)
+    cv.create_line(cx - s * 0.25, cy - s * 0.78, cx - s * 0.25, cy - s * 0.3,
+                   fill=color, width=1.2, tags=tags)
+    icon_plus(cv, cx, cy + s * 0.25, s * 0.28, color, tags=tags, width=1.2)
+
+
 def icon_menu(cv, cx, cy, s, color, tags=()):
     for dy in (-s * 0.6, 0, s * 0.6):
         cv.create_line(cx - s, cy + dy, cx + s, cy + dy, fill=color, width=1.5,
@@ -226,13 +265,13 @@ def icon_menu(cv, cx, cy, s, color, tags=()):
 
 def logo(cv, x, y, s, tags=()):
     """App mark: gradient tile with a terminal caret."""
-    round_rect(cv, x, y, x + s, y + s, s * 0.28, fill=UI["accent"], outline="",
-               tags=tags)
+    c1 = mix(UI["accent"], "#000000", 0.30)
+    c2 = mix(UI["accent2"], "#000000", 0.30)
+    round_rect(cv, x, y, x + s, y + s, s * 0.28, fill=c1, outline="", tags=tags)
     for i in range(10):
         t = i / 9
         round_rect(cv, x, y + s * t * 0.9, x + s, y + s, s * 0.28,
-                   fill=mix(UI["accent"], UI["accent2"], t), outline="",
-                   tags=tags)
+                   fill=mix(c1, c2, t), outline="", tags=tags)
     cv.create_line(x + s * 0.28, y + s * 0.33, x + s * 0.48, y + s * 0.5,
                    x + s * 0.28, y + s * 0.67, fill="#FFFFFF", width=1.7,
                    capstyle="round", joinstyle="round", tags=tags)
