@@ -51,6 +51,10 @@ def discover_shells():
     for cand in ("py.exe", "python.exe"):
         found = None
         for d in os.environ.get("PATH", "").split(os.pathsep):
+            # the WindowsApps aliases exist on every machine; without a real
+            # Python they only open the Store
+            if os.path.normcase(d.rstrip("\\/")).endswith(r"\microsoft\windowsapps"):
+                continue
             p = os.path.join(d, cand)
             if _exists(p):
                 found = p
@@ -137,10 +141,16 @@ class Session:
                 break
             except Exception:                          # noqa: BLE001
                 break
+            if self.proc is not proc:
+                return          # closed or restarted under us: not ours any more
             if data:
                 self._q.put(data)
             elif not proc.isalive():
                 break
+        if self.proc is not proc:
+            # a restart already replaced this process; its exit banner and
+            # its liveness flag must not land on the new shell
+            return
         self._alive = False
         try:
             self.exit_code = proc.exitstatus
@@ -165,6 +175,7 @@ class Session:
 
     def restart(self):
         self.close()
+        self._q = queue.SimpleQueue()      # drop whatever the old shell left
         self.screen._reset(hard=True)
         self.exit_code = None
         self.error = None

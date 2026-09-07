@@ -18,8 +18,9 @@ the same layout every morning, so I built the thing that remembers it.
 What is different from a split terminal:
 
 - **Workspaces.** A workspace is a project folder. The folders inside it become
-  panes. Opening the workspace opens all of them in one click, each shell
-  already in its directory, in the layout you left it in.
+  panes. Opening the workspace opens them in one click (the first six; the
+  rest are a click away in the sidebar), each shell already in its
+  directory, in the layout you left it in.
 - **Startup commands per folder.** Right-click a folder and set the command it
   should run on open. `npm run dev` in `web`, `pytest` in `tests`. Opening
   the workspace starts the project.
@@ -38,8 +39,8 @@ table stakes and is there too.
 ## Install
 
 Download `MultiTerm.exe` from the [releases page](https://github.com/idk-arsh/multiterm/releases/latest) and run it. It is a single
-executable; no installer, no admin rights, nothing written outside
-`%APPDATA%\MultiTerm`.
+executable; no installer, no admin rights. Settings, workspaces and logs
+live in `%APPDATA%\MultiTerm`.
 
 To run from source you need Python 3.9 or newer:
 
@@ -151,7 +152,7 @@ packaged app starts and is immediately torn down with
 run_tests.bat
 ```
 
-- `tests/test_vt.py`: 38 parser checks, including the exact ConPTY handshake.
+- `tests/test_vt.py`: 41 parser checks, including the exact ConPTY handshake.
 - `tests/test_live.py`: spawns real shells and drives them concurrently.
 - `tests/test_gui.py`: drives the real window. Typing, broadcast, layouts,
   divider dragging, find, workspaces, startup commands, plus checks that no

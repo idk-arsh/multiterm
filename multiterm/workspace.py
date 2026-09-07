@@ -6,6 +6,8 @@ opens just that one. Everything is persisted to %APPDATA%\\MultiTerm.
 import json
 import os
 
+from . import log as mlog
+
 STORE_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"),
                          "MultiTerm")
 STORE_FILE = os.path.join(STORE_DIR, "workspaces.json")
@@ -114,11 +116,15 @@ class WorkspaceStore:
     def save(self):
         try:
             os.makedirs(STORE_DIR, exist_ok=True)
-            with open(STORE_FILE, "w", encoding="utf-8") as fh:
+            # write beside the file and swap it in: a crash mid-write must not
+            # cost the user every workspace and startup command
+            tmp = STORE_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump({"workspaces": [w.to_dict() for w in self.items]},
                           fh, indent=2)
+            os.replace(tmp, STORE_FILE)
         except Exception:                              # noqa: BLE001
-            pass
+            mlog.get("workspace").exception("could not save workspaces")
 
     def _defaults(self):
         home = os.path.expanduser("~")

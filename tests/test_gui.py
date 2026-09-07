@@ -229,6 +229,17 @@ def main():
     app.geometry("1200x760")
     pump(app, 0.3)
 
+    # hide and show the sidebar: the show path once asked pack to place the
+    # sidebar before itself and raised
+    app.toggle_sidebar()
+    pump(app, 0.3)
+    check("sidebar hides", not app.sidebar.winfo_ismapped())
+    app.toggle_sidebar()
+    pump(app, 0.3)
+    check("sidebar comes back", app.sidebar.winfo_ismapped()
+          and app.sidebar.winfo_x() < app.right.winfo_x(),
+          (app.sidebar.winfo_ismapped(), app.sidebar.winfo_x(), app.right.winfo_x()))
+
     check("header carries the real controls, no window buttons",
           not any(k[0] == "win" for *_r, k in app.header._hits)
           and {"new_pane", "new_tab", "broadcast", "shell", "menu"}.issubset(

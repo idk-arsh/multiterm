@@ -45,21 +45,41 @@ def load_settings():
     s = dict(DEFAULTS)
     try:
         with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as fh:
-            s.update(json.load(fh))
+            data = json.load(fh)
+        if isinstance(data, dict):
+            s.update(data)
     except Exception:                                  # noqa: BLE001
         pass
     if s.get("theme") not in theme.THEMES:
         s["theme"] = theme.DEFAULT_THEME
+    # a hand-edited file must never take the app down at startup: every value
+    # that is arithmetic or a path is forced back to its type and range
+    for key, lo, hi in (("font_size", 6, 40), ("scrollback", 0, 200000),
+                        ("startup_panes", 1, 12)):
+        try:
+            s[key] = max(lo, min(hi, int(s.get(key))))
+        except (TypeError, ValueError):
+            s[key] = DEFAULTS[key]
+    for key in ("font_family", "default_shell", "start_dir"):
+        if not isinstance(s.get(key), str):
+            s[key] = DEFAULTS[key]
+    if not isinstance(s.get("window", ""), str):
+        s.pop("window", None)
+    s["sidebar"] = bool(s.get("sidebar", True))
     return s
 
 
 def save_settings(s):
     try:
         os.makedirs(SETTINGS_DIR, exist_ok=True)
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as fh:
+        # write beside the file and swap it in, so a crash mid-write or two
+        # instances closing at once cannot leave a truncated settings.json
+        tmp = SETTINGS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(s, fh, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
     except Exception:                                  # noqa: BLE001
-        pass
+        mlog.get("app").exception("could not save settings")
 
 
 # --------------------------------------------------------------------- pane
@@ -209,6 +229,8 @@ class TabPage(tk.Frame):
         self.tree = mlayout.remove_leaf(self.tree, pane)
         if self.maximized is pane:
             self.maximized = None
+        if self.app.active_pane is pane:
+            self.app.active_pane = None
         pane.session.close()
         pane.destroy()
         self.relayout()
@@ -318,6 +340,8 @@ class TabPage(tk.Frame):
             self.relayout()
 
     def close_all(self):
+        if self.app.active_pane in self.panes:
+            self.app.active_pane = None
         for p in list(self.panes):
             p.session.close()
             p.destroy()
@@ -494,6 +518,7 @@ class App(tk.Tk):
 
         right = tk.Frame(body, bg=UI["bg"])
         right.pack(side="left", fill="both", expand=True)
+        self.right = right
         self.tabstrip = TabStrip(right, self)
         self.tabstrip.pack(fill="x", side="top")
         self.content = tk.Frame(right, bg=UI["bg"])
@@ -791,8 +816,9 @@ class App(tk.Tk):
             self.sidebar.pack_forget()
             self.settings["sidebar"] = False
         else:
-            self.sidebar.pack(side="left", fill="y", before=self.body.winfo_children()[0]
-                              if self.body.winfo_children() else None)
+            # pack ahead of the tab area; "before" must name a packed widget,
+            # and the first child of body is the (now unpacked) sidebar itself
+            self.sidebar.pack(side="left", fill="y", before=self.right)
             self.settings["sidebar"] = True
         return "break"
 
@@ -926,6 +952,9 @@ class App(tk.Tk):
             return
         page.remove_pane(pane)
         if page.panes:
+            # FocusIn only fires while the window is active, so hand the
+            # active role over explicitly as well
+            self.on_pane_focus(page.panes[0].view)
             page.panes[0].focus_pane()
         elif len(self._pages) > 1:
             self._pages.remove(page)

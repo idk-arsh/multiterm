@@ -115,6 +115,16 @@ def main():
     ok = wait_for([last], lambda: len(last.screen.all_text().strip()) > 0, 8)
     check("restarted shell prints again", ok)
 
+    # --- 8. restarting a live shell starts clean ---------------------------
+    # the old reader thread used to deliver its exit banner to the new screen
+    live = sessions[0]
+    check("restart of a live shell", live.restart())
+    ok = wait_for([live], lambda: len(live.screen.all_text().strip()) > 0, 8)
+    pump([live], 0.8)
+    check("restarted shell is alive", live.is_alive())
+    check("no stale exit banner after restart",
+          "process exited" not in live.screen.all_text())
+
     for s in sessions:
         s.close()
     time.sleep(0.3)
